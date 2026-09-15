@@ -2,6 +2,26 @@
 
 All notable changes to BloxQA are documented here.
 
+## 0.3.0-dev — Multiplayer QA Foundation
+
+### Added
+
+- Optional `mode` metadata and validated `players` counts for real 2–8 client Studio tests.
+- `MultiplayerCoordinator` and deterministic participant/character helpers in `TestContext`.
+- Minimal Studio-only client harness for the documented `CanLeaveTest`/`LeaveTest` workflow.
+- Two Player Presence Test and Player Leave Test.
+- Player-count metadata in structured results and the plugin panel.
+
+### Changed
+
+- `StudioTestController` now selects `ExecutePlayModeAsync` or `ExecuteMultiplayerTestAsync` from discovered metadata.
+- The protocol and per-place runtime schema are version 2.
+- Mixed single-player/multiplayer Run All remains sequential and continues after failures.
+
+### Packaging
+
+- Added `BloxQAPlugin_0_3_0_dev`; the frozen 0.1.0 and 0.2.0-dev packages remain rollback artifacts.
+
 ## 0.2.0-dev — One-click Project Initialization
 
 ### Added
@@ -41,4 +61,3 @@ All notable changes to BloxQA are documented here.
 - This is a local developer preview, not a Creator Store release.
 - The public source export does not yet include a one-click packaged plugin artifact.
 - Plugin-setting persistence depends on the installed Local Plugin identity.
-

@@ -1,6 +1,6 @@
 local RuntimeTemplate = {
-	runtimeVersion = "0.2.0-dev",
-	schemaVersion = 1,
+	runtimeVersion = "0.3.0-dev",
+	schemaVersion = 2,
 }
 
 RuntimeTemplate.runtimeRoot = {
@@ -10,7 +10,7 @@ RuntimeTemplate.runtimeRoot = {
 		{
 			name = "TestRunner",
 			className = "ModuleScript",
-			source = [====[local TestRunner = {}
+			source = [========[local TestRunner = {}
 
 function TestRunner.run(tests)
 	local results = {}
@@ -52,13 +52,12 @@ function TestRunner.run(tests)
 end
 
 return TestRunner
-
-]====],
+]========],
 		},
 		{
 			name = "TestRegistry",
 			className = "ModuleScript",
-			source = [====[local TestRegistry = {}
+			source = [========[local TestRegistry = {}
 
 local REQUIRED_FIELDS = {
 	"id",
@@ -67,6 +66,11 @@ local REQUIRED_FIELDS = {
 	"description",
 	"timeout",
 	"run",
+}
+
+local VALID_MODES = {
+	singleplayer = true,
+	multiplayer = true,
 }
 
 local function isNonEmptyString(value)
@@ -99,6 +103,23 @@ local function validationError(definition)
 
 	if type(definition.run) ~= "function" then
 		return "field 'run' must be a function"
+	end
+
+	local mode = definition.mode or "singleplayer"
+	if not VALID_MODES[mode] then
+		return "field 'mode' must be 'singleplayer' or 'multiplayer'"
+	end
+
+	if mode == "multiplayer" then
+		if type(definition.players) ~= "number"
+			or definition.players % 1 ~= 0
+			or definition.players < 2
+			or definition.players > 8
+		then
+			return "multiplayer field 'players' must be an integer from 2 to 8"
+		end
+	elseif definition.players ~= nil and definition.players ~= 1 then
+		return "singleplayer field 'players' must be 1 when provided"
 	end
 
 	return nil
@@ -156,6 +177,8 @@ function TestRegistry.discover(container)
 				category = definition.category,
 				description = definition.description,
 				timeout = definition.timeout,
+				mode = definition.mode or "singleplayer",
+				players = definition.mode == "multiplayer" and definition.players or 1,
 				run = definition.run,
 				module = moduleScript,
 			})
@@ -186,13 +209,12 @@ function TestRegistry.findById(testId, container)
 end
 
 return TestRegistry
-
-]====],
+]========],
 		},
 		{
 			name = "TestContext",
 			className = "ModuleScript",
-			source = [====[local Players = game:GetService("Players")
+			source = [========[local MultiplayerCoordinator = require(script.Parent:WaitForChild("MultiplayerCoordinator"))
 
 local TestContext = {}
 TestContext.__index = TestContext
@@ -206,6 +228,9 @@ function TestContext.new(args, testDefinition)
 	self.testName = testDefinition.name
 	self.timeout = testDefinition.timeout
 	self.timeoutSeconds = tonumber(self.timeoutSeconds) or testDefinition.timeout
+	self.mode = testDefinition.mode or "singleplayer"
+	self.expectedPlayers = self.mode == "multiplayer" and testDefinition.players or 1
+	self.multiplayer = MultiplayerCoordinator.new(self.mode, self.expectedPlayers)
 	return self
 end
 
@@ -226,9 +251,30 @@ function TestContext:waitFor(predicate, timeoutSeconds, intervalSeconds)
 end
 
 function TestContext:getPlayer(timeoutSeconds)
-	return self:waitFor(function()
-		return Players:GetPlayers()[1]
-	end, timeoutSeconds)
+	local participants = self.multiplayer:waitForPlayerCount(
+		self.expectedPlayers,
+		timeoutSeconds or self.timeout
+	)
+	return participants and participants[1] or nil
+end
+
+function TestContext:getParticipants(timeoutSeconds)
+	return self.multiplayer:waitForPlayerCount(
+		self.expectedPlayers,
+		timeoutSeconds or self.timeout
+	)
+end
+
+function TestContext:waitForParticipantCount(count, timeoutSeconds)
+	return self.multiplayer:waitForPlayerCount(count, timeoutSeconds or self.timeout)
+end
+
+function TestContext:waitForCharacter(player, timeoutSeconds)
+	return self.multiplayer:waitForCharacter(player, timeoutSeconds or self.timeout)
+end
+
+function TestContext:requestPlayerLeave(player, timeoutSeconds)
+	return self.multiplayer:requestPlayerLeave(player, timeoutSeconds or self.timeout)
 end
 
 function TestContext:expect(condition, message)
@@ -246,14 +292,165 @@ function TestContext:log(message)
 	print(string.format("[BloxQA][%s] %s", self.testId, tostring(message)))
 end
 
-return TestContext
+function TestContext:cleanup()
+	if self.multiplayer then
+		self.multiplayer:destroy()
+		self.multiplayer = nil
+	end
+end
 
-]====],
+return TestContext
+]========],
+		},
+		{
+			name = "MultiplayerCoordinator",
+			className = "ModuleScript",
+			source = [========[local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local MultiplayerCoordinator = {}
+MultiplayerCoordinator.__index = MultiplayerCoordinator
+
+local function sortedPlayers()
+	local participants = Players:GetPlayers()
+	table.sort(participants, function(left, right)
+		if left.UserId ~= right.UserId then
+			return left.UserId < right.UserId
+		end
+		return left.Name < right.Name
+	end)
+	return participants
+end
+
+function MultiplayerCoordinator.new(mode, expectedPlayers)
+	local self = setmetatable({}, MultiplayerCoordinator)
+	self.mode = mode
+	self.expectedPlayers = expectedPlayers
+	self.responses = {}
+
+	if mode == "multiplayer" then
+		local root = ReplicatedStorage:WaitForChild("BloxQA")
+		local existing = root:FindFirstChild("MultiplayerBridge")
+		if existing then
+			existing:Destroy()
+		end
+
+		local bridge = Instance.new("RemoteEvent")
+		bridge.Name = "MultiplayerBridge"
+		bridge.Parent = root
+		self.bridge = bridge
+		self.bridgeConnection = bridge.OnServerEvent:Connect(function(player, responseType, requestId, detail)
+			if responseType == "LeaveReady" or responseType == "LeaveUnavailable" then
+				self.responses[requestId] = {
+					player = player,
+					ready = responseType == "LeaveReady",
+					detail = tostring(detail or ""),
+				}
+			end
+		end)
+	end
+
+	return self
+end
+
+function MultiplayerCoordinator:getPlayers()
+	return sortedPlayers()
+end
+
+function MultiplayerCoordinator:waitForPlayerCount(count, timeoutSeconds)
+	local deadline = os.clock() + timeoutSeconds
+	repeat
+		local participants = sortedPlayers()
+		if #participants == count then
+			return participants
+		end
+		task.wait(0.05)
+	until os.clock() >= deadline
+
+	return nil, string.format(
+		"Timed out waiting for %d participant%s; observed %d",
+		count,
+		count == 1 and "" or "s",
+		#Players:GetPlayers()
+	)
+end
+
+function MultiplayerCoordinator:waitForCharacter(player, timeoutSeconds)
+	local deadline = os.clock() + timeoutSeconds
+	repeat
+		if player.Parent ~= Players then
+			return nil, "Participant left before the character became ready"
+		end
+
+		local character = player.Character
+		if character
+			and character:FindFirstChildOfClass("Humanoid")
+			and character:FindFirstChild("HumanoidRootPart")
+		then
+			return character
+		end
+		task.wait(0.05)
+	until os.clock() >= deadline
+
+	return nil, "Participant character did not become ready before timeout"
+end
+
+function MultiplayerCoordinator:requestPlayerLeave(player, timeoutSeconds)
+	if self.mode ~= "multiplayer" or not self.bridge then
+		return false, "Player leave requires an active BloxQA multiplayer session"
+	end
+	if player.Parent ~= Players then
+		return false, "Selected participant is no longer connected"
+	end
+
+	local requestId = HttpService:GenerateGUID(false)
+	local removed = false
+	local removingConnection = Players.PlayerRemoving:Connect(function(leavingPlayer)
+		if leavingPlayer == player then
+			removed = true
+		end
+	end)
+
+	self.bridge:FireClient(player, "LeaveTest", requestId)
+	local deadline = os.clock() + timeoutSeconds
+	repeat
+		if removed or player.Parent ~= Players then
+			removingConnection:Disconnect()
+			return true
+		end
+
+		local response = self.responses[requestId]
+		if response and not response.ready then
+			removingConnection:Disconnect()
+			return false, response.detail ~= "" and response.detail
+				or "Studio reported that this client cannot leave the test"
+		end
+		task.wait(0.05)
+	until os.clock() >= deadline
+
+	removingConnection:Disconnect()
+	return false, "Timed out waiting for the selected participant to leave"
+end
+
+function MultiplayerCoordinator:destroy()
+	if self.bridgeConnection then
+		self.bridgeConnection:Disconnect()
+		self.bridgeConnection = nil
+	end
+	if self.bridge then
+		self.bridge:Destroy()
+		self.bridge = nil
+	end
+end
+
+return MultiplayerCoordinator
+]========],
 		},
 		{
 			name = "StudioTestController",
 			className = "ModuleScript",
-			source = [====[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+			source = [========[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StudioTestService = game:GetService("StudioTestService")
 
 local root = ReplicatedStorage:WaitForChild("BloxQA")
@@ -262,7 +459,7 @@ local gameplayTests = root:WaitForChild("GameplayTests")
 
 local StudioTestController = {}
 
-local function failedReport(testName, message, durationMs)
+local function failedReport(testName, message, durationMs, mode, expectedPlayers)
 	return {
 		total = 1,
 		passed = 0,
@@ -270,6 +467,8 @@ local function failedReport(testName, message, durationMs)
 		results = {
 			{
 				name = testName,
+				mode = mode or "singleplayer",
+				expectedPlayers = expectedPlayers or 1,
 				status = "FAIL",
 				passed = false,
 				errorMessage = message,
@@ -286,15 +485,23 @@ function StudioTestController.run(testId, options)
 	if not testDefinition then
 		return failedReport(tostring(testId), lookupError, 0)
 	end
+	local mode = testDefinition.mode
+	local expectedPlayers = testDefinition.players
 
 	local startedAt = os.clock()
 	local ok, result = pcall(function()
-		return StudioTestService:ExecutePlayModeAsync({
+		local args = {
 			protocol = "BloxQA",
-			protocolVersion = 1,
+			protocolVersion = 2,
 			testId = testDefinition.id,
 			timeoutSeconds = options.timeoutSeconds or testDefinition.timeout,
-		})
+			mode = mode,
+			expectedPlayers = expectedPlayers,
+		}
+		if mode == "multiplayer" then
+			return StudioTestService:ExecuteMultiplayerTestAsync(expectedPlayers, args)
+		end
+		return StudioTestService:ExecutePlayModeAsync(args)
 	end)
 	local durationMs = math.max(0, math.floor((os.clock() - startedAt) * 1000 + 0.5))
 
@@ -302,7 +509,9 @@ function StudioTestController.run(testId, options)
 		return failedReport(
 			testDefinition.name,
 			"Could not run Studio playtest: " .. tostring(result),
-			durationMs
+			durationMs,
+			mode,
+			expectedPlayers
 		)
 	end
 
@@ -310,7 +519,9 @@ function StudioTestController.run(testId, options)
 		return failedReport(
 			testDefinition.name,
 			"StudioTestService returned an invalid result",
-			durationMs
+			durationMs,
+			mode,
+			expectedPlayers
 		)
 	end
 
@@ -318,20 +529,19 @@ function StudioTestController.run(testId, options)
 end
 
 return StudioTestController
-
-]====],
+]========],
 		},
 		{
 			name = "Version",
 			className = "ModuleScript",
-			source = [====[return {
+			source = [========[return {
 	major = 0,
-	minor = 2,
+	minor = 3,
 	patch = 0,
 	prerelease = "dev",
-	string = "0.2.0-dev",
+	string = "0.3.0-dev",
 }
-]====],
+]========],
 		},
 		{
 			name = "GameplayTests",
@@ -340,7 +550,7 @@ return StudioTestController
 				{
 					name = "CharacterTestUtils",
 					className = "ModuleScript",
-					source = [====[local Players = game:GetService("Players")
+					source = [========[local Players = game:GetService("Players")
 
 local CharacterTestUtils = {}
 
@@ -422,13 +632,12 @@ function CharacterTestUtils.validateLiveCharacter(player, previousCharacter, tim
 end
 
 return CharacterTestUtils
-
-]====],
+]========],
 				},
 				{
 					name = "PlayerSpawnTest",
 					className = "ModuleScript",
-					source = [====[local CharacterTestUtils = require(script.Parent:WaitForChild("CharacterTestUtils"))
+					source = [========[local CharacterTestUtils = require(script.Parent:WaitForChild("CharacterTestUtils"))
 
 return {
 	id = "PlayerSpawn",
@@ -458,13 +667,12 @@ return {
 		return true
 	end,
 }
-
-]====],
+]========],
 				},
 				{
 					name = "PlayerRespawnTest",
 					className = "ModuleScript",
-					source = [====[local CharacterTestUtils = require(script.Parent:WaitForChild("CharacterTestUtils"))
+					source = [========[local CharacterTestUtils = require(script.Parent:WaitForChild("CharacterTestUtils"))
 
 return {
 	id = "PlayerRespawn",
@@ -519,13 +727,102 @@ return {
 		return true
 	end,
 }
+]========],
+				},
+				{
+					name = "TwoPlayerPresenceTest",
+					className = "ModuleScript",
+					source = [========[return {
+	id = "TwoPlayerPresence",
+	name = "Two Player Presence Test",
+	category = "Multiplayer",
+	description = "Verifies that two simulated players join with ready characters.",
+	timeout = 20,
+	mode = "multiplayer",
+	players = 2,
 
-]====],
+	run = function(ctx)
+		local participants, participantError = ctx:getParticipants()
+		ctx:expect(participants ~= nil, participantError)
+		ctx:expect(#participants == 2, "Expected exactly two simulated participants")
+		ctx:expect(participants[1] ~= participants[2], "Expected two distinct Player instances")
+
+		local characters = {}
+		for index, participant in ipairs(participants) do
+			ctx:expect(participant.Parent ~= nil, "Participant " .. index .. " is not connected")
+			local character, characterError = ctx:waitForCharacter(participant)
+			ctx:expect(character ~= nil, characterError)
+			characters[index] = character
+
+			local humanoid = character:FindFirstChildOfClass("Humanoid")
+			ctx:expect(humanoid ~= nil, "Participant " .. index .. " character is missing a Humanoid")
+			ctx:expect(humanoid.Health > 0, "Participant " .. index .. " Humanoid is not alive")
+			ctx:expect(
+				character:FindFirstChild("HumanoidRootPart") ~= nil,
+				"Participant " .. index .. " character is missing HumanoidRootPart"
+			)
+		end
+		ctx:expect(characters[1] ~= characters[2], "Expected two distinct Character instances")
+
+		task.wait(1)
+		for index, participant in ipairs(participants) do
+			ctx:expect(participant.Parent ~= nil, "Participant " .. index .. " left during the assertion window")
+			ctx:expect(participant.Character == characters[index], "Participant " .. index .. " character changed during the assertion window")
+			local humanoid = characters[index]:FindFirstChildOfClass("Humanoid")
+			ctx:expect(humanoid and humanoid.Health > 0, "Participant " .. index .. " did not remain alive")
+			ctx:expect(
+				characters[index]:FindFirstChild("HumanoidRootPart") ~= nil,
+				"Participant " .. index .. " lost HumanoidRootPart during the assertion window"
+			)
+		end
+
+		ctx:log("Two simulated participants joined with ready characters")
+		return true
+	end,
+}
+]========],
+				},
+				{
+					name = "PlayerLeaveTest",
+					className = "ModuleScript",
+					source = [========[return {
+	id = "PlayerLeave",
+	name = "Player Leave Test",
+	category = "Multiplayer",
+	description = "Verifies that one simulated client can leave while the other remains active.",
+	timeout = 25,
+	mode = "multiplayer",
+	players = 2,
+
+	run = function(ctx)
+		local participants, participantError = ctx:getParticipants()
+		ctx:expect(participants ~= nil, participantError)
+
+		for _, participant in ipairs(participants) do
+			local character, characterError = ctx:waitForCharacter(participant)
+			ctx:expect(character ~= nil, characterError)
+		end
+
+		local departed, leaveError = ctx:requestPlayerLeave(participants[2], 10)
+		ctx:expect(departed, leaveError)
+
+		local remaining, remainingError = ctx:waitForParticipantCount(1, 5)
+		ctx:expect(remaining ~= nil, remainingError)
+		local character, characterError = ctx:waitForCharacter(remaining[1], 5)
+		ctx:expect(character ~= nil, characterError)
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		ctx:expect(humanoid and humanoid.Health > 0, "Remaining participant was not alive after the leave")
+
+		ctx:log("One simulated participant left and one remained active")
+		return true
+	end,
+}
+]========],
 				},
 				{
 					name = "ExampleTestTemplate",
 					className = "ModuleScript",
-					source = [====[-- BloxQA test authoring template.
+					source = [========[-- BloxQA test authoring template.
 -- Duplicate this module, rename the copy so its name ends in "Test",
 -- then replace the sample metadata and assertions below.
 -- This template is ignored by automatic discovery because its name does not end in "Test".
@@ -536,6 +833,9 @@ return {
 	category = "Gameplay",
 	description = "Describe what this verifies.",
 	timeout = 10,
+	-- Single-player is the default. For a multiplayer test, add:
+	-- mode = "multiplayer",
+	-- players = 2, -- integer from 2 through 8
 
 	run = function(ctx)
 		ctx:log("Starting My Test")
@@ -547,8 +847,7 @@ return {
 		return true
 	end,
 }
-
-]====],
+]========],
 				},
 			},
 		},
@@ -558,8 +857,9 @@ return {
 RuntimeTemplate.serverHarness = {
 	name = "BloxQAGameplayTestServer",
 	className = "Script",
-	disabled = true,
-	source = [====[local RunService = game:GetService("RunService")
+	disabled = false,
+	source = [========[local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StudioTestService = game:GetService("StudioTestService")
 
@@ -574,7 +874,7 @@ end)
 if not gotArgs
 	or type(args) ~= "table"
 	or args.protocol ~= "BloxQA"
-	or args.protocolVersion ~= 1
+	or args.protocolVersion ~= 2
 then
 	return
 end
@@ -584,6 +884,30 @@ local TestRunner = require(root:WaitForChild("TestRunner"))
 local TestRegistry = require(root:WaitForChild("TestRegistry"))
 local TestContext = require(root:WaitForChild("TestContext"))
 local gameplayTests = root:WaitForChild("GameplayTests")
+
+local function failureReport(name, message, mode, expectedPlayers, durationMs)
+	return {
+		total = 1,
+		passed = 0,
+		failed = 1,
+		mode = mode,
+		expectedPlayers = expectedPlayers,
+		playerCount = #Players:GetPlayers(),
+		results = {
+			{
+				testId = tostring(args.testId),
+				name = name,
+				mode = mode,
+				expectedPlayers = expectedPlayers,
+				playerCount = #Players:GetPlayers(),
+				status = "FAIL",
+				passed = false,
+				errorMessage = tostring(message),
+				durationMs = math.max(0, tonumber(durationMs) or 0),
+			},
+		},
+	}
+end
 
 local testDefinition, lookupError, discoveryErrors = TestRegistry.findById(args.testId, gameplayTests)
 for _, discoveryError in ipairs(discoveryErrors) do
@@ -595,28 +919,36 @@ for _, discoveryError in ipairs(discoveryErrors) do
 end
 
 if not testDefinition then
-	local name = tostring(args.testId)
-	StudioTestService:EndTest({
-		total = 1,
-		passed = 0,
-		failed = 1,
-		results = {
-			{
-				name = name,
-				status = "FAIL",
-				passed = false,
-				errorMessage = lookupError,
-				durationMs = 0,
-			},
-		},
-	})
+	StudioTestService:EndTest(failureReport(
+		tostring(args.testId),
+		lookupError,
+		tostring(args.mode or "singleplayer"),
+		tonumber(args.expectedPlayers) or 1,
+		0
+	))
 	return
 end
 
-print(string.format("[BloxQA] Starting StudioTestService test: %s", args.testId))
+if args.mode ~= testDefinition.mode or args.expectedPlayers ~= testDefinition.players then
+	StudioTestService:EndTest(failureReport(
+		testDefinition.name,
+		"Controller metadata did not match the discovered test definition",
+		testDefinition.mode,
+		testDefinition.players,
+		0
+	))
+	return
+end
+
+print(string.format(
+	"[BloxQA] Starting %s StudioTestService test: %s (%d player%s)",
+	testDefinition.mode,
+	args.testId,
+	testDefinition.players,
+	testDefinition.players == 1 and "" or "s"
+))
 
 local context = TestContext.new(args, testDefinition)
-
 local originalRun = testDefinition.run
 local runnableTest = {
 	name = testDefinition.name,
@@ -625,22 +957,105 @@ local runnableTest = {
 	end,
 }
 
-local report = TestRunner.run({ runnableTest })
+local startedAt = os.clock()
+local completed = false
+local report
+task.spawn(function()
+	report = TestRunner.run({ runnableTest })
+	completed = true
+end)
+
+local hardDeadline = startedAt + testDefinition.timeout + 3
+while not completed and os.clock() < hardDeadline do
+	task.wait(0.05)
+end
+
+if not completed then
+	report = failureReport(
+		testDefinition.name,
+		string.format("Test exceeded its %g second timeout", testDefinition.timeout),
+		testDefinition.mode,
+		testDefinition.players,
+		math.floor((os.clock() - startedAt) * 1000 + 0.5)
+	)
+end
+
 local result = report.results[1]
+result.testId = testDefinition.id
+result.mode = testDefinition.mode
+result.expectedPlayers = testDefinition.players
+result.playerCount = #Players:GetPlayers()
+report.mode = testDefinition.mode
+report.expectedPlayers = testDefinition.players
+report.playerCount = result.playerCount
 
 print(string.format(
-	"[BloxQA] %s — %s — %dms%s",
+	"[BloxQA] %s — %s — %dms — players %d/%d%s",
 	result.status,
 	result.name,
 	result.durationMs,
+	result.playerCount,
+	result.expectedPlayers,
 	result.errorMessage and (" — " .. result.errorMessage) or ""
 ))
 
+context:cleanup()
 StudioTestService:EndTest(report)
+]========],
+}
 
-]====],
+RuntimeTemplate.clientHarness = {
+	name = "BloxQAMultiplayerTestClient",
+	className = "LocalScript",
+	disabled = false,
+	source = [========[local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StudioTestService = game:GetService("StudioTestService")
+
+if not RunService:IsStudio() then
+	return
+end
+
+local root = ReplicatedStorage:WaitForChild("BloxQA", 30)
+if not root then
+	return
+end
+
+local bridge = root:WaitForChild("MultiplayerBridge", 30)
+if not bridge or not bridge:IsA("RemoteEvent") then
+	return
+end
+
+bridge.OnClientEvent:Connect(function(command, requestId)
+	if command ~= "LeaveTest" then
+		return
+	end
+
+	local canCheck, canLeave = pcall(function()
+		return StudioTestService:CanLeaveTest()
+	end)
+	if not canCheck or not canLeave then
+		bridge:FireServer(
+			"LeaveUnavailable",
+			requestId,
+			canCheck and "Studio reported that this client cannot leave the test"
+				or "Could not check whether this client can leave the test"
+		)
+		return
+	end
+
+	bridge:FireServer("LeaveReady", requestId)
+	task.defer(function()
+		local ok, message = pcall(function()
+			StudioTestService:LeaveTest()
+		end)
+		if not ok then
+			warn("[BloxQA] Client failed to leave multiplayer test: " .. tostring(message))
+		end
+	end)
+end)
+]========],
 }
 
 return RuntimeTemplate
-
 

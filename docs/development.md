@@ -11,6 +11,8 @@ return {
     category = "Gameplay",
     description = "What this test verifies.",
     timeout = 10,
+    mode = "multiplayer",
+    players = 2,
 
     run = function(ctx)
         -- Assertions or a boolean result.
@@ -19,7 +21,7 @@ return {
 }
 ```
 
-`id`, `name`, `category`, and `description` must be non-empty strings. `timeout` must be a positive number and `run` must be a function. IDs must be unique within the discovered container.
+`id`, `name`, `category`, and `description` must be non-empty strings. `timeout` must be a positive number and `run` must be a function. IDs must be unique within the discovered container. `mode` is optional and defaults to `singleplayer`; multiplayer definitions must set `mode = "multiplayer"` and an integer `players` count from 2 through 8.
 
 ## Adding a test
 
@@ -36,6 +38,11 @@ The template itself ends in `Template`, so it is intentionally ignored.
 - `ctx.testId`, `ctx.testName`, `ctx.timeout`, and `ctx.timeoutSeconds` expose current metadata/execution arguments.
 - `ctx:waitFor(predicate, timeoutSeconds?, intervalSeconds?)` polls a protected predicate and returns its first truthy value or `nil`.
 - `ctx:getPlayer(timeoutSeconds?)` waits for the first player in the play session.
+- `ctx.mode` and `ctx.expectedPlayers` expose normalized execution metadata.
+- `ctx:getParticipants(timeoutSeconds?)` waits for the expected deterministic participant list.
+- `ctx:waitForParticipantCount(count, timeoutSeconds?)` waits for an exact player count.
+- `ctx:waitForCharacter(player, timeoutSeconds?)` waits for a Humanoid and HumanoidRootPart.
+- `ctx:requestPlayerLeave(player, timeoutSeconds?)` requests a simulated Studio client to leave; it is multiplayer-only.
 - `ctx:expect(condition, message?)` throws a test failure when the condition is false.
 - `ctx:fail(message?)` throws an explicit test failure.
 - `ctx:log(message)` writes a test-prefixed Studio Output message.
@@ -68,5 +75,6 @@ Before publishing a release:
 7. Confirm history updates and controls recover after a failed run.
 8. Start an ordinary manual play session and confirm the harness exits when no BloxQA protocol arguments are present.
 9. Confirm no unrelated Workspace instances changed.
+10. Run Two Player Presence and Player Leave through real Studio multiplayer sessions and verify player counts in reports.
 
 AI-assisted workflows were used during development. Review generated changes against the source contracts above and verify behavior in Studio rather than treating generated code as proof of correctness.

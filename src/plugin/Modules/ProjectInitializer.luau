@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local StarterPlayer = game:GetService("StarterPlayer")
 local RuntimeTemplate = require(script.Parent:WaitForChild("RuntimeTemplate"))
 
 local ProjectInitializer = {}
@@ -7,13 +8,14 @@ local ProjectInitializer = {}
 local OWNER_ATTRIBUTE = "BloxQAOwned"
 local SCHEMA_ATTRIBUTE = "BloxQASchemaVersion"
 local RUNTIME_ATTRIBUTE = "BloxQARuntimeVersion"
-local SCHEMA_VERSION = 1
-local RUNTIME_VERSION = "0.2.0-dev"
+local SCHEMA_VERSION = 2
+local RUNTIME_VERSION = "0.3.0-dev"
 
 local REQUIRED_ROOT_CHILDREN = {
 	TestRunner = "ModuleScript",
 	TestRegistry = "ModuleScript",
 	TestContext = "ModuleScript",
+	MultiplayerCoordinator = "ModuleScript",
 	StudioTestController = "ModuleScript",
 	Version = "ModuleScript",
 	GameplayTests = "Folder",
@@ -23,8 +25,14 @@ local REQUIRED_GAMEPLAY_CHILDREN = {
 	CharacterTestUtils = "ModuleScript",
 	PlayerSpawnTest = "ModuleScript",
 	PlayerRespawnTest = "ModuleScript",
+	TwoPlayerPresenceTest = "ModuleScript",
+	PlayerLeaveTest = "ModuleScript",
 	ExampleTestTemplate = "ModuleScript",
 }
+
+local function getClientHarness()
+	return StarterPlayer.StarterPlayerScripts:FindFirstChild("BloxQAMultiplayerTestClient")
+end
 
 local function isOwned(instance)
 	return instance ~= nil and instance:GetAttribute(OWNER_ATTRIBUTE) == true
@@ -40,11 +48,28 @@ local function addIssue(issues, message, repairable)
 	return repairable
 end
 
+local function inspectOwnedInstance(instance, path, className, issues, repairable)
+	if not instance then
+		return addIssue(issues, "Missing " .. path .. ".", repairable)
+	end
+	if instance.ClassName ~= className then
+		return addIssue(issues, path .. " must be a " .. className .. "; existing object was not changed.", false)
+	end
+	if not isOwned(instance) then
+		return addIssue(issues, path .. " is not marked as BloxQA-owned; existing content was not changed.", false)
+	end
+	if not metadataMatches(instance) then
+		return addIssue(issues, path .. " metadata does not match the current runtime.", false)
+	end
+	return repairable
+end
+
 function ProjectInitializer.inspect()
 	local root = ReplicatedStorage:FindFirstChild("BloxQA")
 	local harness = ServerScriptService:FindFirstChild("BloxQAGameplayTestServer")
+	local clientHarness = getClientHarness()
 
-	if not root and not harness then
+	if not root and not harness and not clientHarness then
 		return {
 			state = "missing",
 			healthy = false,
@@ -62,60 +87,50 @@ function ProjectInitializer.inspect()
 			repairable = addIssue(issues, "ReplicatedStorage.BloxQA must be a Folder; existing object was not changed.", false)
 		elseif not isOwned(root) then
 			repairable = addIssue(issues, "ReplicatedStorage.BloxQA is not marked as BloxQA-owned; existing content was not changed.", false)
-		elseif root:GetAttribute(SCHEMA_ATTRIBUTE) ~= SCHEMA_VERSION then
-			repairable = addIssue(issues, "Runtime schema is unsupported and requires a future migration.", false)
+		elseif not metadataMatches(root) then
+			repairable = addIssue(issues, "ReplicatedStorage.BloxQA metadata does not match runtime 0.3.0-dev schema 2.", false)
 		else
-			if root:GetAttribute(RUNTIME_ATTRIBUTE) ~= RUNTIME_VERSION then
-				repairable = addIssue(issues, "Runtime version metadata does not match " .. RUNTIME_VERSION .. ".", false)
-			end
 			for name, className in pairs(REQUIRED_ROOT_CHILDREN) do
-				local child = root:FindFirstChild(name)
-				if not child then
-					repairable = addIssue(issues, "Missing ReplicatedStorage.BloxQA." .. name .. ".", repairable)
-				elseif child.ClassName ~= className then
-					repairable = addIssue(
-						issues,
-						string.format("ReplicatedStorage.BloxQA.%s must be a %s; existing object was not changed.", name, className),
-						false
-					)
-				elseif not isOwned(child) then
-					repairable = addIssue(issues, "ReplicatedStorage.BloxQA." .. name .. " is not marked as BloxQA-owned; existing content was not changed.", false)
-				elseif not metadataMatches(child) then
-					repairable = addIssue(issues, "ReplicatedStorage.BloxQA." .. name .. " metadata does not match the current runtime.", false)
-				end
+				repairable = inspectOwnedInstance(
+					root:FindFirstChild(name),
+					"ReplicatedStorage.BloxQA." .. name,
+					className,
+					issues,
+					repairable
+				)
 			end
 
 			local gameplayTests = root:FindFirstChild("GameplayTests")
 			if gameplayTests and gameplayTests:IsA("Folder") and isOwned(gameplayTests) and metadataMatches(gameplayTests) then
 				for name, className in pairs(REQUIRED_GAMEPLAY_CHILDREN) do
-					local child = gameplayTests:FindFirstChild(name)
-					if not child then
-						repairable = addIssue(issues, "Missing ReplicatedStorage.BloxQA.GameplayTests." .. name .. ".", repairable)
-					elseif child.ClassName ~= className then
-						repairable = addIssue(issues, "ReplicatedStorage.BloxQA.GameplayTests." .. name .. " must be a " .. className .. "; existing object was not changed.", false)
-					elseif not isOwned(child) then
-						repairable = addIssue(issues, "ReplicatedStorage.BloxQA.GameplayTests." .. name .. " is not marked as BloxQA-owned; existing content was not changed.", false)
-					elseif not metadataMatches(child) then
-						repairable = addIssue(issues, "ReplicatedStorage.BloxQA.GameplayTests." .. name .. " metadata does not match the current runtime.", false)
-					end
+					repairable = inspectOwnedInstance(
+						gameplayTests:FindFirstChild(name),
+						"ReplicatedStorage.BloxQA.GameplayTests." .. name,
+						className,
+						issues,
+						repairable
+					)
 				end
 			end
 		end
 	else
-		repairable = addIssue(issues, "Missing ReplicatedStorage.BloxQA.", repairable and isOwned(harness))
+		repairable = addIssue(issues, "Missing ReplicatedStorage.BloxQA.", repairable and isOwned(harness) and isOwned(clientHarness))
 	end
 
-	if harness then
-		if not harness:IsA("Script") then
-			repairable = addIssue(issues, "ServerScriptService.BloxQAGameplayTestServer must be a Script; existing object was not changed.", false)
-		elseif not isOwned(harness) then
-			repairable = addIssue(issues, "ServerScriptService.BloxQAGameplayTestServer is not marked as BloxQA-owned; existing content was not changed.", false)
-		elseif not metadataMatches(harness) then
-			repairable = addIssue(issues, "Server harness metadata does not match the current runtime.", false)
-		end
-	else
-		repairable = addIssue(issues, "Missing ServerScriptService.BloxQAGameplayTestServer.", repairable and isOwned(root))
-	end
+	repairable = inspectOwnedInstance(
+		harness,
+		"ServerScriptService.BloxQAGameplayTestServer",
+		"Script",
+		issues,
+		repairable and isOwned(root)
+	)
+	repairable = inspectOwnedInstance(
+		clientHarness,
+		"StarterPlayer.StarterPlayerScripts.BloxQAMultiplayerTestClient",
+		"LocalScript",
+		issues,
+		repairable and isOwned(root)
+	)
 
 	local healthy = #issues == 0
 	return {
@@ -126,6 +141,7 @@ function ProjectInitializer.inspect()
 		issues = issues,
 		root = root,
 		harness = harness,
+		clientHarness = clientHarness,
 	}
 end
 
@@ -178,7 +194,9 @@ function ProjectInitializer.initialize()
 
 	local rootClone = instantiate(RuntimeTemplate.runtimeRoot)
 	local harnessClone = instantiate(RuntimeTemplate.serverHarness)
+	local clientHarnessClone = instantiate(RuntimeTemplate.clientHarness)
 	harnessClone.Disabled = false
+	clientHarnessClone.Disabled = false
 
 	local created = {}
 	local ok, message = pcall(function()
@@ -186,6 +204,8 @@ function ProjectInitializer.initialize()
 		table.insert(created, rootClone)
 		harnessClone.Parent = ServerScriptService
 		table.insert(created, harnessClone)
+		clientHarnessClone.Parent = StarterPlayer.StarterPlayerScripts
+		table.insert(created, clientHarnessClone)
 	end)
 	if not ok then
 		for index = #created, 1, -1 do
@@ -241,6 +261,13 @@ function ProjectInitializer.repair()
 			harness.Parent = ServerScriptService
 			table.insert(created, harness)
 		end
+
+		if not getClientHarness() then
+			local clientHarness = instantiate(RuntimeTemplate.clientHarness)
+			clientHarness.Disabled = false
+			clientHarness.Parent = StarterPlayer.StarterPlayerScripts
+			table.insert(created, clientHarness)
+		end
 	end)
 	if not ok then
 		for index = #created, 1, -1 do
@@ -256,11 +283,13 @@ end
 function ProjectInitializer.removeOwnedRuntime()
 	local root = ReplicatedStorage:FindFirstChild("BloxQA")
 	local harness = ServerScriptService:FindFirstChild("BloxQAGameplayTestServer")
-	for _, instance in ipairs({ root, harness }) do
+	local clientHarness = getClientHarness()
+	for _, instance in ipairs({ root, harness, clientHarness }) do
 		if instance and (not isOwned(instance) or instance:GetAttribute(SCHEMA_ATTRIBUTE) ~= SCHEMA_VERSION) then
 			return false, "Refusing to remove unowned or unsupported BloxQA content."
 		end
 	end
+	if clientHarness then clientHarness:Destroy() end
 	if harness then harness:Destroy() end
 	if root then root:Destroy() end
 	return true, "Owned BloxQA runtime removed."
@@ -271,4 +300,3 @@ ProjectInitializer.SCHEMA_VERSION = SCHEMA_VERSION
 ProjectInitializer.RUNTIME_VERSION = RUNTIME_VERSION
 
 return ProjectInitializer
-

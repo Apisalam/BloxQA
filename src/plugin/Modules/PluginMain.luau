@@ -49,6 +49,9 @@ local function failedResult(test, message, durationMs)
 	return {
 		testId = test.id,
 		name = test.name,
+		mode = test.mode or "singleplayer",
+		expectedPlayers = test.players or 1,
+		playerCount = nil,
 		status = "FAIL",
 		passed = false,
 		errorMessage = tostring(message),
@@ -77,6 +80,9 @@ local function normalizeResult(test, report, fallbackDurationMs)
 	return {
 		testId = test.id,
 		name = type(result.name) == "string" and result.name or test.name,
+		mode = result.mode or test.mode or "singleplayer",
+		expectedPlayers = tonumber(result.expectedPlayers) or test.players or 1,
+		playerCount = tonumber(result.playerCount),
 		status = result.passed and "PASS" or "FAIL",
 		passed = result.passed,
 		errorMessage = result.errorMessage and tostring(result.errorMessage) or nil,
@@ -295,7 +301,7 @@ function PluginMain.start(pluginInstance)
 		BackgroundColor3 = COLORS.button,
 		BorderSizePixel = 0,
 		Font = Enum.Font.SourceSansSemibold,
-		Text = "Run All Gameplay Tests",
+		Text = "Run All Visible Tests",
 		TextColor3 = Color3.new(1, 1, 1),
 		TextSize = 15,
 		Parent = root,
@@ -505,21 +511,27 @@ function PluginMain.start(pluginInstance)
 		clearGenerated(results, "BloxQAResult")
 		for index, result in ipairs(renderedResults) do
 			local hasError = result.errorMessage ~= nil and result.errorMessage ~= ""
+			local playerLine = result.mode == "multiplayer" and string.format(
+				"\nPlayers: %s/%d",
+				result.playerCount and tostring(result.playerCount) or "?",
+				result.expectedPlayers
+			) or ""
 			local label = create("TextLabel", {
 				Name = result.passed and "PassResult" or "FailResult",
 				LayoutOrder = index,
-				Size = UDim2.new(1, -14, 0, hasError and 60 or 34),
+				Size = UDim2.new(1, -14, 0, (hasError and 60 or 34) + (playerLine ~= "" and 20 or 0)),
 				BackgroundColor3 = result.passed
 					and Color3.fromRGB(31, 61, 53)
 					or Color3.fromRGB(73, 42, 39),
 				BorderSizePixel = 0,
 				Font = Enum.Font.SourceSans,
 				Text = string.format(
-					"%s %s — %s — %dms%s",
+					"%s %s — %s — %dms%s%s",
 					result.passed and "✓" or "✕",
 					result.status,
 					result.name,
 					result.durationMs,
+					playerLine,
 					hasError and ("\n" .. result.errorMessage) or ""
 				),
 				TextColor3 = result.passed and COLORS.pass or COLORS.fail,
@@ -684,11 +696,13 @@ function PluginMain.start(pluginInstance)
 		local completed = false
 		local ok
 		local report
-		task.spawn(function()
-			ok, report = pcall(controller.run, test.id, {
-				timeoutSeconds = test.timeout,
-				testName = test.name,
-			})
+			task.spawn(function()
+				ok, report = pcall(controller.run, test.id, {
+					timeoutSeconds = test.timeout,
+					testName = test.name,
+					mode = test.mode,
+					players = test.players,
+				})
 			completed = true
 		end)
 
@@ -799,6 +813,8 @@ function PluginMain.start(pluginInstance)
 			row:SetAttribute("BloxQATestRow", true)
 			row:SetAttribute("TestId", test.id)
 			row:SetAttribute("Category", test.category)
+			row:SetAttribute("Mode", test.mode)
+			row:SetAttribute("Players", test.players)
 			rounded(row)
 
 			create("TextLabel", {
@@ -815,6 +831,9 @@ function PluginMain.start(pluginInstance)
 			})
 
 			local recent = latest[test.id]
+			local modePrefix = test.mode == "multiplayer"
+				and string.format("%d Players · ", test.players)
+				or ""
 			create("TextLabel", {
 				Name = "Latest",
 				Size = UDim2.new(1, -82, 0, 20),
@@ -822,11 +841,12 @@ function PluginMain.start(pluginInstance)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.SourceSans,
 				Text = recent and string.format(
-					"%s %s · %dms",
+					"%s%s %s · %dms",
+					modePrefix,
 					recent.status == "PASS" and "✓" or "✕",
 					recent.status,
 					recent.durationMs
-				) or "Not run yet",
+				) or (modePrefix .. "Not run yet"),
 				TextColor3 = recent
 					and (recent.status == "PASS" and COLORS.pass or COLORS.fail)
 					or COLORS.muted,
@@ -932,7 +952,7 @@ function PluginMain.start(pluginInstance)
 
 		setBusy(false)
 		refreshTests()
-		status.Text = #runList > 0 and "All gameplay tests completed" or "No valid tests discovered"
+		status.Text = #runList > 0 and "All visible tests completed" or "No valid tests discovered"
 		return renderedResults
 	end
 
@@ -1055,6 +1075,8 @@ function PluginMain.start(pluginInstance)
 				category = test.category,
 				description = test.description,
 				timeout = test.timeout,
+				mode = test.mode,
+				players = test.players,
 			}
 		end
 		local errors = {}
@@ -1100,4 +1122,3 @@ function PluginMain.start(pluginInstance)
 end
 
 return PluginMain
-

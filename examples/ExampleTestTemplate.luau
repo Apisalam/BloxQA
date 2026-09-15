@@ -9,6 +9,9 @@ return {
 	category = "Gameplay",
 	description = "Describe what this verifies.",
 	timeout = 10,
+	-- Single-player is the default. For a multiplayer test, add:
+	-- mode = "multiplayer",
+	-- players = 2, -- integer from 2 through 8
 
 	run = function(ctx)
 		ctx:log("Starting My Test")
@@ -20,4 +23,3 @@ return {
 		return true
 	end,
 }
-

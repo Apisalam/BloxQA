@@ -9,6 +9,11 @@ local REQUIRED_FIELDS = {
 	"run",
 }
 
+local VALID_MODES = {
+	singleplayer = true,
+	multiplayer = true,
+}
+
 local function isNonEmptyString(value)
 	return type(value) == "string" and value:match("%S") ~= nil
 end
@@ -39,6 +44,23 @@ local function validationError(definition)
 
 	if type(definition.run) ~= "function" then
 		return "field 'run' must be a function"
+	end
+
+	local mode = definition.mode or "singleplayer"
+	if not VALID_MODES[mode] then
+		return "field 'mode' must be 'singleplayer' or 'multiplayer'"
+	end
+
+	if mode == "multiplayer" then
+		if type(definition.players) ~= "number"
+			or definition.players % 1 ~= 0
+			or definition.players < 2
+			or definition.players > 8
+		then
+			return "multiplayer field 'players' must be an integer from 2 to 8"
+		end
+	elseif definition.players ~= nil and definition.players ~= 1 then
+		return "singleplayer field 'players' must be 1 when provided"
 	end
 
 	return nil
@@ -100,6 +122,8 @@ function TestRegistry.discover(container)
 				category = definition.category,
 				description = definition.description,
 				timeout = definition.timeout,
+				mode = definition.mode or "singleplayer",
+				players = definition.mode == "multiplayer" and definition.players or 1,
 				run = definition.run,
 				module = moduleScript,
 			})
@@ -130,4 +154,3 @@ function TestRegistry.findById(testId, container)
 end
 
 return TestRegistry
-

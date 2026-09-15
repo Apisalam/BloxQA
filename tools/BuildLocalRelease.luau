@@ -4,11 +4,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local BuildLocalRelease = {}
 
 local DEFAULT_RELEASE_NOTES = [[
-BloxQA 0.2.0-dev Developer Preview
-- One-click, idempotent per-place runtime initialization
-- Embedded runtime template with starter gameplay tests
-- Missing, healthy, and incomplete/corrupt project diagnostics
-- Runtime ownership and schema metadata for future migrations
+BloxQA 0.3.0-dev Developer Preview
+- Real StudioTestService multiplayer sessions for 2 to 8 simulated clients
+- Multiplayer metadata, validation, participant context, and structured player counts
+- Two Player Presence and Player Leave starter tests
+- Single-player compatibility and sequential mixed-mode Run All
 ]]
 
 local INSTALL_INSTRUCTIONS = [[
@@ -16,9 +16,9 @@ local INSTALL_INSTRUCTIONS = [[
 2. Select this root Script in Studio Explorer (not its Modules folder and not the old BloxQA_0_1_0 Model).
 3. Choose Plugins > Save as Local Plugin and name it BloxQA.
 4. Confirm replacement if Studio asks, close every Studio window, and restart Studio.
-5. Open a brand-new Baseplate and confirm the BloxQA toolbar and v0.2.0-dev panel appear.
-6. Click Initialize BloxQA and confirm the two starter tests appear without reopening the panel.
-7. Run the discovered starter tests in the initialized place.
+5. Open a brand-new Baseplate and confirm the BloxQA toolbar and v0.3.0-dev panel appear.
+6. Click Initialize BloxQA and confirm the four starter tests appear without reopening the panel.
+7. Run the Gameplay and Multiplayer tests in the initialized place.
 See LOCAL_PLUGIN_RELEASE.md in the BloxQA project for details.
 ]]
 
@@ -86,4 +86,3 @@ function BuildLocalRelease.build(version, options)
 end
 
 return BuildLocalRelease
-

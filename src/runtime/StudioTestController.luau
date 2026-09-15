@@ -7,7 +7,7 @@ local gameplayTests = root:WaitForChild("GameplayTests")
 
 local StudioTestController = {}
 
-local function failedReport(testName, message, durationMs)
+local function failedReport(testName, message, durationMs, mode, expectedPlayers)
 	return {
 		total = 1,
 		passed = 0,
@@ -15,6 +15,8 @@ local function failedReport(testName, message, durationMs)
 		results = {
 			{
 				name = testName,
+				mode = mode or "singleplayer",
+				expectedPlayers = expectedPlayers or 1,
 				status = "FAIL",
 				passed = false,
 				errorMessage = message,
@@ -31,15 +33,23 @@ function StudioTestController.run(testId, options)
 	if not testDefinition then
 		return failedReport(tostring(testId), lookupError, 0)
 	end
+	local mode = testDefinition.mode
+	local expectedPlayers = testDefinition.players
 
 	local startedAt = os.clock()
 	local ok, result = pcall(function()
-		return StudioTestService:ExecutePlayModeAsync({
+		local args = {
 			protocol = "BloxQA",
-			protocolVersion = 1,
+			protocolVersion = 2,
 			testId = testDefinition.id,
 			timeoutSeconds = options.timeoutSeconds or testDefinition.timeout,
-		})
+			mode = mode,
+			expectedPlayers = expectedPlayers,
+		}
+		if mode == "multiplayer" then
+			return StudioTestService:ExecuteMultiplayerTestAsync(expectedPlayers, args)
+		end
+		return StudioTestService:ExecutePlayModeAsync(args)
 	end)
 	local durationMs = math.max(0, math.floor((os.clock() - startedAt) * 1000 + 0.5))
 
@@ -47,7 +57,9 @@ function StudioTestController.run(testId, options)
 		return failedReport(
 			testDefinition.name,
 			"Could not run Studio playtest: " .. tostring(result),
-			durationMs
+			durationMs,
+			mode,
+			expectedPlayers
 		)
 	end
 
@@ -55,7 +67,9 @@ function StudioTestController.run(testId, options)
 		return failedReport(
 			testDefinition.name,
 			"StudioTestService returned an invalid result",
-			durationMs
+			durationMs,
+			mode,
+			expectedPlayers
 		)
 	end
 
@@ -63,4 +77,3 @@ function StudioTestController.run(testId, options)
 end
 
 return StudioTestController
-

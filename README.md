@@ -2,7 +2,7 @@
 
 Automated QA and gameplay testing for Roblox Studio.
 
-> **Developer preview — v0.2.0-dev.** BloxQA is an early local tool, not a published Creator Store plugin or production test platform. The frozen v0.1.0 package remains the rollback release.
+> **Developer preview — v0.3.0-dev.** BloxQA is an early local tool, not a published Creator Store plugin or production test platform. The frozen v0.1.0 and v0.2.0-dev packages remain rollback releases.
 
 ## Overview
 
@@ -22,6 +22,8 @@ Gameplay checks such as “did the player spawn correctly?” are easy to repeat
 - Required metadata validation and duplicate-ID diagnostics
 - Dynamic category filters; filtered runs execute only visible tests
 - Studio play-mode execution through `StudioTestService`
+- Real 2–8 client multiplayer execution through `ExecuteMultiplayerTestAsync`
+- Multiplayer participant readiness, character validation, and controlled client-leave support
 - Server-side harness and structured PASS/FAIL reports with durations and errors
 - Minimal `TestContext` helpers for waiting, assertions, failure messages, logging, and player lookup
 - Plugin-side watchdogs and malformed-result/runtime error handling
@@ -38,7 +40,7 @@ flowchart TD
     A[Studio toolbar and dock panel] --> B[Plugin TestRegistry]
     B --> C[Discovered GameplayTests]
     A --> D[Plugin StudioTestController]
-    D -->|ExecutePlayModeAsync| E[StudioTestService play session]
+    D -->|Play or multiplayer async| E[StudioTestService session]
     E --> F[BloxQAGameplayTestServer]
     F --> G[Runtime TestRegistry]
     G --> H[TestContext and selected gameplay test]
@@ -47,7 +49,7 @@ flowchart TD
     D --> J[Panel results and HistoryStore]
 ```
 
-The installed plugin contains everything required to start its UI globally and an embedded template for installing the per-place runtime. Actual gameplay execution remains per-place, but v0.2.0-dev can create the runtime, starter tests, and server harness from the onboarding panel.
+The installed plugin contains everything required to start its UI globally and an embedded template for installing the per-place runtime. Actual gameplay execution remains per-place, but v0.3.0-dev can create the runtime, four starter tests, server harness, and minimal Studio-only client harness from the onboarding panel.
 
 See [Architecture](docs/architecture.md) for component responsibilities and failure handling.
 
@@ -82,7 +84,7 @@ Copy `examples/ExampleTestTemplate.luau` into the place's `ReplicatedStorage.Blo
 BloxQA currently uses a source-based local installation workflow:
 
 1. Build or update the root-Script package and save that root using **Plugins → Save as Local Plugin**.
-2. Restart Studio, open the BloxQA panel, and confirm version `0.2.0-dev` appears.
+2. Restart Studio, open the BloxQA panel, and confirm version `0.3.0-dev` appears.
 3. In a place without BloxQA, click **Initialize BloxQA** once.
 4. Run one discovered test, choose a category filter, or run all currently visible tests.
 
@@ -99,7 +101,7 @@ BloxQA/
 ├── src/
 │   ├── plugin/              # Global Studio plugin and embedded modules
 │   ├── runtime/             # Per-place runner, context, registry and harness
-│   └── tests/gameplay/      # Verified spawn and respawn tests
+│   └── tests/               # Gameplay and multiplayer starter tests
 ├── examples/                # Discovery-safe authoring template
 ├── tools/                   # Studio-side local release builder
 ├── docs/
@@ -113,12 +115,14 @@ BloxQA/
 
 ## Current status
 
-Version `0.2.0-dev` initializes two gameplay starter tests:
+Version `0.3.0-dev` initializes four starter tests:
 
 - **Player Spawn Test** verifies that a player receives a live Character with a Humanoid and HumanoidRootPart.
 - **Player Respawn Test** kills the initial Humanoid and verifies that a distinct, live Character appears.
+- **Two Player Presence Test** launches two simulated clients and verifies that both participants have ready characters.
+- **Player Leave Test** asks one simulated client to leave and verifies that the remaining participant stays active.
 
-Both tests were verified in the BloxQA development place. This repository does not claim CI, multiplayer, device simulation, input automation, cloud reporting, or Creator Store distribution.
+All four tests were verified in real StudioTestService sessions in the BloxQA development place. This repository does not claim CI, device simulation, input automation, cloud reporting, or Creator Store distribution.
 
 ## Limitations and roadmap
 
@@ -128,10 +132,11 @@ Current limitations:
 - Gameplay tests run one at a time in separate play-mode sessions.
 - The runtime and server harness are installed in each tested place by the plugin and remain place-owned data.
 - Tests execute through the server harness; client input automation is not implemented.
+- Multiplayer is limited to one Studio multiplayer session at a time and 2–8 simulated clients.
 - History is local to the installed plugin identity and limited to 20 lightweight entries.
 - The current release is still a local Studio package, not a Creator Store distribution.
 
-Reasonable next steps are a reproducible package/export workflow, automated Luau checks, a documented compatibility matrix, and additional non-input gameplay assertions.
+The recommended next feature milestone is a small scenario/step engine built on the stable single-player and multiplayer execution contracts, without adding input simulation or cloud services.
 
 ## Development
 
@@ -142,4 +147,3 @@ See [Development and testing](docs/development.md) and [Screenshot checklist](do
 ## License
 
 BloxQA is available under the [MIT License](LICENSE).
-

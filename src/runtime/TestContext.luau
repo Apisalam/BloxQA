@@ -1,4 +1,4 @@
-local Players = game:GetService("Players")
+local MultiplayerCoordinator = require(script.Parent:WaitForChild("MultiplayerCoordinator"))
 
 local TestContext = {}
 TestContext.__index = TestContext
@@ -12,6 +12,9 @@ function TestContext.new(args, testDefinition)
 	self.testName = testDefinition.name
 	self.timeout = testDefinition.timeout
 	self.timeoutSeconds = tonumber(self.timeoutSeconds) or testDefinition.timeout
+	self.mode = testDefinition.mode or "singleplayer"
+	self.expectedPlayers = self.mode == "multiplayer" and testDefinition.players or 1
+	self.multiplayer = MultiplayerCoordinator.new(self.mode, self.expectedPlayers)
 	return self
 end
 
@@ -32,9 +35,30 @@ function TestContext:waitFor(predicate, timeoutSeconds, intervalSeconds)
 end
 
 function TestContext:getPlayer(timeoutSeconds)
-	return self:waitFor(function()
-		return Players:GetPlayers()[1]
-	end, timeoutSeconds)
+	local participants = self.multiplayer:waitForPlayerCount(
+		self.expectedPlayers,
+		timeoutSeconds or self.timeout
+	)
+	return participants and participants[1] or nil
+end
+
+function TestContext:getParticipants(timeoutSeconds)
+	return self.multiplayer:waitForPlayerCount(
+		self.expectedPlayers,
+		timeoutSeconds or self.timeout
+	)
+end
+
+function TestContext:waitForParticipantCount(count, timeoutSeconds)
+	return self.multiplayer:waitForPlayerCount(count, timeoutSeconds or self.timeout)
+end
+
+function TestContext:waitForCharacter(player, timeoutSeconds)
+	return self.multiplayer:waitForCharacter(player, timeoutSeconds or self.timeout)
+end
+
+function TestContext:requestPlayerLeave(player, timeoutSeconds)
+	return self.multiplayer:requestPlayerLeave(player, timeoutSeconds or self.timeout)
 end
 
 function TestContext:expect(condition, message)
@@ -52,5 +76,11 @@ function TestContext:log(message)
 	print(string.format("[BloxQA][%s] %s", self.testId, tostring(message)))
 end
 
-return TestContext
+function TestContext:cleanup()
+	if self.multiplayer then
+		self.multiplayer:destroy()
+		self.multiplayer = nil
+	end
+end
 
+return TestContext
