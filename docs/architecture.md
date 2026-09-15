@@ -42,8 +42,10 @@ The plugin embeds its own copies of:
 - `TestRegistry` for safe edit-time discovery.
 - `StudioTestController` for the `StudioTestService` boundary.
 - `HistoryStore` for bounded plugin-setting persistence.
+- `ProjectInitializer` for project-state inspection, idempotent setup, and conservative repair.
+- `RuntimeTemplate` for the self-contained per-place runtime and starter-test sources.
 
-If the current place has no BloxQA runtime, the toolbar and panel still load and display a diagnostic.
+If the current place has no BloxQA runtime, the toolbar and panel show onboarding instead of run controls. Initialization materializes only the embedded BloxQA runtime under `ReplicatedStorage.BloxQA` and `ServerScriptService.BloxQAGameplayTestServer`. Every created object is marked with `BloxQAOwned`, `BloxQASchemaVersion`, and `BloxQARuntimeVersion` attributes. Unowned or incompatible objects are diagnosed and never silently replaced.
 
 ## Per-place runtime
 
@@ -81,3 +83,4 @@ The plugin validates incoming reports before displaying them. Service errors, ma
 ## History
 
 `HistoryStore` records the test ID, display name, PASS/FAIL status, duration, timestamp, and optional error. It keeps at most 20 entries and uses `Plugin:GetSetting`/`Plugin:SetSetting`. Persistence failures are caught; in-memory history remains usable for the current plugin session.
+

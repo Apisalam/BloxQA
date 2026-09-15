@@ -1,7 +1,8 @@
 return {
 	major = 0,
-	minor = 1,
+	minor = 2,
 	patch = 0,
-	string = "0.1.0",
+	prerelease = "dev",
+	string = "0.2.0-dev",
 }
 

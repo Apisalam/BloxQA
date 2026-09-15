@@ -5,6 +5,7 @@ local Version = require(script.Parent:WaitForChild("Version"))
 local TestRegistry = require(script.Parent:WaitForChild("TestRegistry"))
 local HistoryStore = require(script.Parent:WaitForChild("HistoryStore"))
 local StudioTestController = require(script.Parent:WaitForChild("StudioTestController"))
+local ProjectInitializer = require(script.Parent:WaitForChild("ProjectInitializer"))
 
 local PluginMain = {}
 
@@ -196,6 +197,70 @@ function PluginMain.start(pluginInstance)
 		Parent = diagnostics,
 	})
 
+	local onboarding = create("Frame", {
+		Name = "ProjectOnboarding",
+		LayoutOrder = 5,
+		Size = UDim2.new(1, 0, 0, 154),
+		BackgroundColor3 = COLORS.surface,
+		BorderSizePixel = 0,
+		Visible = false,
+		Parent = root,
+	})
+	rounded(onboarding)
+	local onboardingTitle = create("TextLabel", {
+		Name = "Title",
+		Size = UDim2.new(1, -20, 0, 28),
+		Position = UDim2.fromOffset(10, 10),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.SourceSansBold,
+		Text = "No BloxQA project detected",
+		TextColor3 = COLORS.text,
+		TextSize = 18,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = onboarding,
+	})
+	local onboardingDescription = create("TextLabel", {
+		Name = "Description",
+		Size = UDim2.new(1, -20, 0, 56),
+		Position = UDim2.fromOffset(10, 42),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.SourceSans,
+		Text = "Set up BloxQA in this experience to begin automated testing.",
+		TextColor3 = COLORS.muted,
+		TextSize = 14,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Parent = onboarding,
+	})
+	local initializeButton = create("TextButton", {
+		Name = "InitializeBloxQA",
+		Size = UDim2.new(1, -20, 0, 36),
+		Position = UDim2.new(0, 10, 1, -46),
+		BackgroundColor3 = COLORS.button,
+		BorderSizePixel = 0,
+		Font = Enum.Font.SourceSansSemibold,
+		Text = "Initialize BloxQA",
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 15,
+		Parent = onboarding,
+	})
+	rounded(initializeButton)
+	local repairButton = create("TextButton", {
+		Name = "RepairBloxQA",
+		Size = UDim2.new(1, -20, 0, 36),
+		Position = UDim2.new(0, 10, 1, -46),
+		BackgroundColor3 = COLORS.button,
+		BorderSizePixel = 0,
+		Font = Enum.Font.SourceSansSemibold,
+		Text = "Repair BloxQA",
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 15,
+		Visible = false,
+		Parent = onboarding,
+	})
+	rounded(repairButton)
+
 	local filterBar = create("Frame", {
 		Name = "CategoryFilters",
 		LayoutOrder = 5,
@@ -328,32 +393,15 @@ function PluginMain.start(pluginInstance)
 	local controllerError = nil
 	local gameplayTests = nil
 	local placeRuntimeError = nil
+	local projectInspection = nil
 
 	local function resolvePlaceRuntime()
-		local placeRoot = ReplicatedStorage:FindFirstChild("BloxQA")
-		if not placeRoot or not placeRoot:IsA("Folder") then
-			return nil, "Per-place BloxQA runtime is not installed in this place."
+		local inspection = ProjectInitializer.inspect()
+		if not inspection.healthy then
+			local detail = #inspection.issues > 0 and (" " .. table.concat(inspection.issues, " ")) or ""
+			return nil, inspection.message .. detail, inspection
 		end
-
-		local container = placeRoot:FindFirstChild("GameplayTests")
-		if not container or not container:IsA("Folder") then
-			return nil, "Per-place runtime is missing ReplicatedStorage.BloxQA.GameplayTests."
-		end
-
-		local missing = {}
-		for _, name in ipairs({ "TestRunner", "TestRegistry", "TestContext" }) do
-			if not placeRoot:FindFirstChild(name) then
-				table.insert(missing, "ReplicatedStorage.BloxQA." .. name)
-			end
-		end
-		if not ServerScriptService:FindFirstChild("BloxQAGameplayTestServer") then
-			table.insert(missing, "ServerScriptService.BloxQAGameplayTestServer")
-		end
-
-		if #missing > 0 then
-			return container, "Per-place runtime is incomplete; missing " .. table.concat(missing, ", ")
-		end
-		return container, nil
+		return inspection.root:FindFirstChild("GameplayTests"), nil, inspection
 	end
 
 	local history = HistoryStore.new(pluginInstance)
@@ -377,6 +425,32 @@ function PluginMain.start(pluginInstance)
 		runAllButton.Active = not value
 		runAllButton.AutoButtonColor = not value
 		runAllButton.BackgroundColor3 = value and COLORS.buttonDisabled or COLORS.button
+		for _, button in ipairs({ initializeButton, repairButton }) do
+			button.Active = not value
+			button.AutoButtonColor = not value
+			button.BackgroundColor3 = value and COLORS.buttonDisabled or COLORS.button
+		end
+	end
+
+	local function renderProjectState()
+		local healthy = projectInspection and projectInspection.healthy
+		onboarding.Visible = not healthy
+		for _, control in ipairs({ filterBar, testList, runAllButton, summary, results, historyToggle }) do
+			control.Visible = healthy
+		end
+		historyFrame.Visible = healthy and historyExpanded
+		if healthy then
+			return
+		end
+
+		local missing = projectInspection and projectInspection.state == "missing"
+		onboardingTitle.Text = missing and "No BloxQA project detected" or "BloxQA project needs attention"
+		onboardingDescription.Text = missing
+			and "Set up BloxQA in this experience to begin automated testing."
+			or (projectInspection and table.concat(projectInspection.issues, "\n") or "Unable to inspect this place.")
+		initializeButton.Visible = missing
+		repairButton.Visible = not missing and projectInspection and projectInspection.repairable or false
+		onboarding.Size = UDim2.new(1, 0, 0, missing and 154 or math.max(154, 98 + 28 * #(projectInspection and projectInspection.issues or {})))
 	end
 
 	local function getCategories()
@@ -660,14 +734,32 @@ function PluginMain.start(pluginInstance)
 		return result
 	end
 
+	local function performProjectAction(action, runningText)
+		if busy then
+			return false
+		end
+		setBusy(true)
+		status.Text = runningText
+		local callOk, succeeded, message = pcall(action)
+		setBusy(false)
+		refreshTests()
+		if not callOk then
+			status.Text = "BloxQA project setup failed: " .. tostring(succeeded)
+			return false
+		end
+		status.Text = tostring(message)
+		return succeeded
+	end
+
 	refreshTests = function()
-		gameplayTests, placeRuntimeError = resolvePlaceRuntime()
+		gameplayTests, placeRuntimeError, projectInspection = resolvePlaceRuntime()
 		if gameplayTests then
 			tests, discoveryErrors = TestRegistry.discover(gameplayTests)
 		else
 			tests = {}
 			discoveryErrors = {}
 		end
+		renderProjectState()
 		renderDiagnostics()
 		renderFilters()
 		clearGenerated(testList, "BloxQATestRow")
@@ -797,10 +889,10 @@ function PluginMain.start(pluginInstance)
 		testList.Size = UDim2.new(1, 0, 0, math.max(34, testListLayout.AbsoluteContentSize.Y))
 		if controllerError then
 			status.Text = "Controller unavailable: " .. controllerError
-		elseif not gameplayTests then
-			status.Text = "Plugin ready — install the BloxQA per-place runtime to run tests"
+		elseif projectInspection and projectInspection.state == "missing" then
+			status.Text = "No BloxQA project detected"
 		elseif placeRuntimeError then
-			status.Text = "Plugin ready — per-place runtime is incomplete"
+			status.Text = "BloxQA project requires attention"
 		elseif #discoveryErrors > 0 then
 			status.Text = string.format(
 				"Ready — %d valid, %d invalid test%s",
@@ -846,6 +938,12 @@ function PluginMain.start(pluginInstance)
 
 	runAllButton.Activated:Connect(function()
 		task.spawn(runAll)
+	end)
+	initializeButton.Activated:Connect(function()
+		task.spawn(performProjectAction, ProjectInitializer.initialize, "Initializing BloxQA...")
+	end)
+	repairButton.Activated:Connect(function()
+		task.spawn(performProjectAction, ProjectInitializer.repair, "Repairing BloxQA...")
 	end)
 	historyToggle.Activated:Connect(function()
 		historyExpanded = not historyExpanded
@@ -942,6 +1040,12 @@ function PluginMain.start(pluginInstance)
 	function api.RunAll()
 		return runAll()
 	end
+	function api.InitializeProject()
+		return performProjectAction(ProjectInitializer.initialize, "Initializing BloxQA...")
+	end
+	function api.RepairProject()
+		return performProjectAction(ProjectInitializer.repair, "Repairing BloxQA...")
+	end
 	function api.GetSnapshot()
 		local discovered = {}
 		for index, test in ipairs(tests) do
@@ -963,6 +1067,12 @@ function PluginMain.start(pluginInstance)
 		end
 		return {
 			version = Version.string,
+			projectState = projectInspection and projectInspection.state or "unknown",
+			projectHealthy = projectInspection and projectInspection.healthy or false,
+			projectRepairable = projectInspection and projectInspection.repairable or false,
+			projectIssues = projectInspection and projectInspection.issues or {},
+			runtimeVersion = ProjectInitializer.RUNTIME_VERSION,
+			schemaVersion = ProjectInitializer.SCHEMA_VERSION,
 			widgetEnabled = widget.Enabled,
 			historyExpanded = historyExpanded,
 			selectedCategory = selectedCategory or "All",

@@ -2,7 +2,7 @@
 
 Automated QA and gameplay testing for Roblox Studio.
 
-> **Developer preview — v0.1.0.** BloxQA is an early local tool, not a published Creator Store plugin or production test platform.
+> **Developer preview — v0.2.0-dev.** BloxQA is an early local tool, not a published Creator Store plugin or production test platform. The frozen v0.1.0 package remains the rollback release.
 
 ## Overview
 
@@ -28,6 +28,8 @@ Gameplay checks such as “did the player spawn correctly?” are easy to repeat
 - Bounded history of 20 results using plugin settings; the panel shows the five newest entries
 - Semantic version module and local release builder
 - Self-contained global plugin startup with clear diagnostics when a place runtime is absent
+- One-click, idempotent per-place initialization with ownership/schema metadata
+- Safe missing, healthy, and incomplete/corrupt project detection
 
 ## How it works
 
@@ -45,7 +47,7 @@ flowchart TD
     D --> J[Panel results and HistoryStore]
 ```
 
-The installed plugin contains everything required to start its UI globally. Actual gameplay execution is intentionally per-place: the tested place must contain the BloxQA runtime, tests, and server harness.
+The installed plugin contains everything required to start its UI globally and an embedded template for installing the per-place runtime. Actual gameplay execution remains per-place, but v0.2.0-dev can create the runtime, starter tests, and server harness from the onboarding panel.
 
 See [Architecture](docs/architecture.md) for component responsibilities and failure handling.
 
@@ -79,12 +81,12 @@ Copy `examples/ExampleTestTemplate.luau` into the place's `ReplicatedStorage.Blo
 
 BloxQA currently uses a source-based local installation workflow:
 
-1. Recreate the global plugin hierarchy from `src/plugin` in Studio and save its root Script using **Plugins → Save as Local Plugin**.
-2. Add the contents of `src/runtime` and `src/tests/gameplay` to the place being tested.
-3. Restart Studio, open the BloxQA panel, and confirm version `0.1.0` appears.
+1. Build or update the root-Script package and save that root using **Plugins → Save as Local Plugin**.
+2. Restart Studio, open the BloxQA panel, and confirm version `0.2.0-dev` appears.
+3. In a place without BloxQA, click **Initialize BloxQA** once.
 4. Run one discovered test, choose a category filter, or run all currently visible tests.
 
-Exact instance mappings and replacement steps are in [Installation](docs/installation.md). A one-click packaged release is not included in this source export yet.
+Exact instance mappings, safety behavior, and replacement steps are in [Installation](docs/installation.md).
 
 ## Repository structure
 
@@ -111,7 +113,7 @@ BloxQA/
 
 ## Current status
 
-Version `0.1.0` includes two gameplay tests:
+Version `0.2.0-dev` initializes two gameplay starter tests:
 
 - **Player Spawn Test** verifies that a player receives a live Character with a Humanoid and HumanoidRootPart.
 - **Player Respawn Test** kills the initial Humanoid and verifies that a distinct, live Character appears.
@@ -124,10 +126,10 @@ Current limitations:
 
 - Studio-only; the server harness exits outside Studio.
 - Gameplay tests run one at a time in separate play-mode sessions.
-- The runtime and server harness must be installed in each tested place.
+- The runtime and server harness are installed in each tested place by the plugin and remain place-owned data.
 - Tests execute through the server harness; client input automation is not implemented.
 - History is local to the installed plugin identity and limited to 20 lightweight entries.
-- No automated command-line build or one-click public release artifact is included yet.
+- The current release is still a local Studio package, not a Creator Store distribution.
 
 Reasonable next steps are a reproducible package/export workflow, automated Luau checks, a documented compatibility matrix, and additional non-input gameplay assertions.
 
